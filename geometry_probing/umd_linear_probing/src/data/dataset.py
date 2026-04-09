@@ -97,6 +97,7 @@ class UMDAffordanceDataset(Dataset):
         exclude_background: bool = False,
         pad_to_patch_multiple: bool = False,
         geometry: Optional[Dict[str, Any]] = None,
+        target_image_size: Optional[tuple] = None,
     ) -> None:
         self.dataset_root = Path(dataset_root)
         self.split_records = split_records
@@ -107,6 +108,7 @@ class UMDAffordanceDataset(Dataset):
         self.min_patch_coverage = min_patch_coverage
         self.exclude_background = exclude_background
         self.pad_to_patch_multiple = pad_to_patch_multiple
+        self.target_image_size = tuple(target_image_size) if target_image_size else None
         # Geometry config
         self.geom_cfg = geometry if isinstance(geometry, dict) else None
         self.geom_index: Dict[str, Dict[str, str]] = {}
@@ -160,6 +162,14 @@ class UMDAffordanceDataset(Dataset):
             remapped[foreground] = mask[foreground] - 1
         else:
             remapped = mask
+
+        if self.target_image_size is not None:
+            th, tw = self.target_image_size
+            image_array = cv2.resize(image_array, (tw, th), interpolation=cv2.INTER_CUBIC)
+            remapped = cv2.resize(
+                remapped.astype(np.float32), (tw, th),
+                interpolation=cv2.INTER_NEAREST,
+            ).astype(np.int64)
 
         if self.pad_to_patch_multiple:
             image_array, remapped = _pad_to_patch_multiple(

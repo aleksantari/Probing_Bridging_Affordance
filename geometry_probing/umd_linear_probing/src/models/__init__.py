@@ -5,18 +5,28 @@ Avoid importing heavyweight/optional dependencies at module import time.
 
 from .dino import DINOBackbone, DINOv3Backbone
 from .dinov2 import DINOv2Backbone
-from .openclip import OpenCLIPBackbone
-from .sam import SAMBackbone
 from .linear_head import MultiLayerLinearHead
 
 __all__ = [
     "DINOBackbone",
     "DINOv3Backbone",
     "DINOv2Backbone",
-    "OpenCLIPBackbone",
-    "SAMBackbone",
     "MultiLayerLinearHead",
 ]
+
+try:
+    from .openclip import OpenCLIPBackbone
+except Exception:
+    OpenCLIPBackbone = None
+else:
+    __all__.append("OpenCLIPBackbone")
+
+try:
+    from .sam import SAMBackbone
+except Exception:
+    SAMBackbone = None
+else:
+    __all__.append("SAMBackbone")
 
 # Optional: SigLIP2 backbone (depends on transformers)
 try:  # pragma: no cover - optional dependency
@@ -41,3 +51,11 @@ except Exception:
     StableDiffusionBackbone = None  # type: ignore
 else:
     __all__.append("StableDiffusionBackbone")
+
+# Optional: SigLIP So400m backbone (raw, PaliGemma, pi0, pi0.5 sources)
+try:  # pragma: no cover - optional dependency
+    from .siglip_so400m import SigLIPSo400mBackbone  # type: ignore
+except Exception:
+    SigLIPSo400mBackbone = None  # type: ignore
+else:
+    __all__.append("SigLIPSo400mBackbone")

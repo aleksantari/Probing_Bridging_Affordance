@@ -25,6 +25,7 @@ from src.models import (
     DINOv2Backbone,
     FluxBackbone,
     SigLIP2Backbone,
+    SigLIPSo400mBackbone,
     SAMBackbone,
     StableDiffusionBackbone,
 )
@@ -249,6 +250,24 @@ class LinearProbeExperiment:
             self.backbone = SigLIP2Backbone(**siglip_params)
             self.target_layer = self.backbone.default_layer
             self.patch_size = patch_size
+        elif self.model_target == "siglip_so400m":
+            self.logger.info(
+                "Instantiating SigLIP-So400m backbone (source=%s, model_id=%s)",
+                self.model_params.get("source", "raw"),
+                self.model_params.get("model_id"),
+            )
+            self.transform = get_default_image_transform()
+            so_params = dict(self.model_params)
+            so_params.setdefault("device", str(self.device))
+            patch_size = so_params.pop("patch_size", 14)
+            if SigLIPSo400mBackbone is None:
+                raise RuntimeError(
+                    "SigLIPSo400mBackbone is unavailable. "
+                    "Install compatible transformers/lerobot."
+                )
+            self.backbone = SigLIPSo400mBackbone(**so_params)
+            self.target_layer = self.backbone.default_layer
+            self.patch_size = patch_size
         elif self.model_target == "sam":
             self.logger.info("Instantiating SAM backbone %s", self.model_params.get("arch", "vit_h"))
             # Use SAM-specific transform (ToTensor only). SAMBackbone applies
@@ -277,6 +296,9 @@ class LinearProbeExperiment:
         )
 
     def _build_dataset(self, split: str) -> UMDAffordanceDataset:
+        image_size = self.dataset_cfg.get("image_size")
+        if isinstance(image_size, (list, tuple)):
+            image_size = tuple(image_size)
         return UMDAffordanceDataset(
             dataset_root=Path(self.dataset_cfg["root"]),
             split_records=self.split_mapping[split],
@@ -288,6 +310,7 @@ class LinearProbeExperiment:
             exclude_background=self.dataset_cfg.get("exclude_background", False),
             pad_to_patch_multiple=self.dataset_cfg.get("pad_to_patch_multiple", False),
             geometry=self.dataset_cfg.get("geometry"),
+            target_image_size=image_size,
         )
 
     def _build_dataloaders(self):
@@ -353,16 +376,14 @@ class LinearProbeExperiment:
     def _infer_feature_shape(self):
         batch = next(iter(self.train_loader))
         images = batch["image"]
-        if images.dim() != 4 or images.shape[1:] != (3, 480, 640):
-            height, width = images.shape[-2:]
+        if images.dim() != 4 or images.shape[1] != 3:
+            raise ValueError(f"Expected 4D tensor with 3 channels, got {tuple(images.shape)}")
+        height, width = images.shape[-2:]
+        if height % self.patch_size != 0 or width % self.patch_size != 0:
             if not self.dataset_cfg.get("pad_to_patch_multiple", False):
                 raise ValueError(
-                    f"Expected input images with shape (B, 3, 480, 640); received {tuple(images.shape)}"
-                )
-            if images.shape[1] != 3 or height % self.patch_size != 0 or width % self.patch_size != 0:
-                raise ValueError(
-                    "Padded images must have 3 channels and spatial dims divisible by patch size "
-                    f"{self.patch_size}; received {tuple(images.shape)}"
+                    f"Image spatial dims ({height}x{width}) not divisible by patch_size "
+                    f"{self.patch_size}. Set pad_to_patch_multiple: true or use a compatible image_size."
                 )
 
         precision = self.training_cfg.get("precision", "bf16")

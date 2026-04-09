@@ -38,6 +38,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="[Optional] Local override config, merged into --defaults.",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override the seed from config (for multi-seed runs).",
+    )
     return parser.parse_args()
 
 
@@ -48,6 +54,8 @@ def main() -> None:
         config = load_config(args.config, None)
     else:
         raise FileNotFoundError("Please provide --config pointing to a valid YAML file.")
+    if args.seed is not None:
+        config["training"]["seed"] = args.seed
     experiment = LinearProbeExperiment(config)
     experiment.train()
 
