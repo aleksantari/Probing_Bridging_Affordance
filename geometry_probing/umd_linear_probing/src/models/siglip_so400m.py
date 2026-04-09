@@ -111,6 +111,10 @@ class SigLIPSo400mBackbone(nn.Module):
         for param in self.vision_tower.parameters():
             param.requires_grad_(False)
 
+        # Grab the post-LayerNorm to apply to intermediate hidden states,
+        # matching DINOv2's norm=True behavior in get_intermediate_layers().
+        self.layer_norm = self.vision_tower.vision_model.post_layernorm
+
         # Get normalization stats from the canonical So400m image processor
         from transformers import AutoImageProcessor
 
@@ -221,6 +225,8 @@ class SigLIPSo400mBackbone(nn.Module):
                     f"received {seq_len}. Check image size or model config."
                 )
 
+            # Apply LayerNorm to match DINOv2's norm=True extraction
+            patch_tokens = self.layer_norm(patch_tokens)
             patch_tokens = patch_tokens.to(torch.float32)
             batch_size = patch_tokens.shape[0]
             feature_dim = patch_tokens.shape[-1]
