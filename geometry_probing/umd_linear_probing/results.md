@@ -357,3 +357,122 @@ raw (0.267) → PG1 (0.334, +6.7pp) → π0 (0.361, +2.7pp) → π0.5 (0.339, -2
 The res224 results are arguably more meaningful for the VLA thesis because **224×224 is the actual operating resolution of π0/π0.5**. At this resolution, VLA fine-tuning shows a clear benefit: PG1 > raw (+6.7pp) and π0 > PG1 (+2.7pp). The degradation only appears at π0.5 (-2.2pp), suggesting that knowledge-insulated training may over-specialize.
 
 However, the resumd results show that this benefit is resolution-specific, not a fundamental improvement in feature quality. When evaluated at higher resolution (where positional encoding quality matters more), the VLA checkpoints lose their advantage.
+
+---
+---
+
+# Phase 1 Linear Probing Results — Res224 Multi-Seed (n=4)
+
+**Date:** 2026-04-14
+**Seeds:** 1337 (existing, from §10) + 42, 2024, 7 (new)
+**Training:** unchanged — max_epochs=2, patience=1, lr=0.001, wd=0.01, batch_size=4, precision=bf16, geometry disabled
+**Code:** post-LayerNorm-fix (same as §10). DINOv2 code path unchanged since §1.
+**Scope:** res224 configs only. Resumd was **not** re-run and remains n=1.
+
+---
+
+## 18. Multi-Seed Setup
+
+Sections §1–§17 report every res224 ordering from a single seed (1337). Adjacent-rank gaps of 0.1–3 pp were being read as findings with no noise floor. To establish one, we re-ran the six res224 configs at three additional seeds (42, 2024, 7), giving n=4 per encoder. All 18 new runs completed with rc=0; output dirs are `outputs/{encoder}_res224_20260414-21XXXX/`. The seed is recorded in each run's `summary.json` and `config_snapshot.yaml`.
+
+**What this section does and does not do.** It establishes a noise floor at res224 and revisits §17's claims against it. It does **not** re-run resumd, fix the res384 raw-SigLIP crash, ablate the patch-coverage threshold, or explain the val/test gap (see §23).
+
+---
+
+## 19. Aggregate Test mIoU (n=4)
+
+Sorted by mean. Per-seed values listed in seed order **[1337, 42, 2024, 7]** (seeds are verified against each run's `config_snapshot.yaml`).
+
+| Rank | Encoder | Params | n | Mean | Std | Min | Max | Per-seed values [1337, 42, 2024, 7] |
+|------|---------|--------|---|------|-----|-----|-----|--------------------------------------|
+| 1 | SigLIP π0.5 | 400M | 4 | **0.3889** | 0.0424 | 0.3387 | 0.4418 | [0.339, 0.393, 0.382, 0.442] |
+| 2 | DINOv2-L/14 | 300M | 4 | **0.3773** | 0.0113 | 0.3624 | 0.3888 | [0.362, 0.389, 0.375, 0.383] |
+| 3 | SigLIP π0 | 400M | 4 | **0.3719** | 0.0192 | 0.3524 | 0.3954 | [0.361, 0.352, 0.379, 0.395] |
+| 4 | SigLIP PG1 | 400M | 4 | **0.3519** | 0.0261 | 0.3292 | 0.3862 | [0.334, 0.358, 0.329, 0.386] |
+| 5 | DINOv2-B/14 | 86M | 4 | **0.3383** | 0.0281 | 0.3171 | 0.3769 | [0.318, 0.377, 0.317, 0.341] |
+| 6 | SigLIP raw | 400M | 4 | **0.3125** | 0.0415 | 0.2673 | 0.3651 | [0.267, 0.365, 0.322, 0.296] |
+
+**Two things to notice:**
+
+1. **DINOv2-L/14 is by far the most seed-stable encoder** (σ = 0.011, vs ≥ 0.019 for every other encoder and ≥ 0.041 for π0.5 and raw). Its position in the ranking is the most trustworthy even though its mean is not on top.
+
+2. **Almost every adjacent-rank gap is inside the per-encoder seed noise:**
+
+   | Adjacent pair | Mean gap | Relevant σ | Separated? |
+   |---|---|---|---|
+   | π0.5 − DINOv2-L | 1.2 pp | σ_π0.5 = 4.2 pp, σ_L = 1.1 pp | **No** |
+   | DINOv2-L − π0 | 0.5 pp | σ_π0 = 1.9 pp | **No** |
+   | π0 − PG1 | 2.0 pp | σ_PG1 = 2.6 pp | **No** |
+   | PG1 − DINOv2-B | 1.4 pp | σ_B = 2.8 pp | **No** |
+   | DINOv2-B − raw | 2.6 pp | σ_raw = 4.2 pp | **No** |
+
+   Only the **top–bottom gap** (π0.5 − raw ≈ 7.6 pp) clearly exceeds per-encoder σ, and even that is fragile given how wide π0.5 and raw spread individually. At n=4, no adjacent pair at res224 is statistically separated.
+
+---
+
+## 20. Per-Class Test IoU — n=4 Mean
+
+Affordance classes (background excluded): grasp, cut, scoop, contain, pound, support, wrap-grasp.
+
+| Encoder | grasp | cut | scoop | contain | pound | support | wrap-grasp |
+|---------|-------|-----|-------|---------|-------|---------|------------|
+| DINOv2-L/14 | 0.111 | 0.354 | 0.226 | **0.636** | **0.417** | 0.387 | 0.511 |
+| DINOv2-B/14 | 0.080 | 0.388 | 0.189 | 0.576 | 0.302 | 0.323 | 0.510 |
+| SigLIP raw | 0.090 | 0.318 | 0.174 | 0.531 | 0.227 | 0.374 | 0.473 |
+| SigLIP PG1 | 0.121 | 0.384 | 0.219 | 0.593 | 0.309 | 0.346 | 0.491 |
+| SigLIP π0 | 0.106 | 0.384 | **0.279** | 0.622 | 0.325 | 0.324 | **0.564** |
+| SigLIP π0.5 | **0.127** | **0.392** | **0.293** | 0.603 | 0.357 | **0.436** | 0.515 |
+
+π0.5 leads on 5 of 7 classes (grasp, cut, scoop, support, and ties π0 on scoop), DINOv2-L leads on contain and pound, π0 leads on wrap-grasp. These per-class rankings inherit all the significance caveats from §19 — with per-encoder σ on the order of 2–4 pp at the *overall* mIoU level, individual class gaps are even less reliable.
+
+---
+
+## 21. Claims from §17 Revisited
+
+| §17 claim | n=4 verdict | Notes |
+|---|---|---|
+| "DINOv2 > SigLIP at resumd" | **Untouched** — resumd not re-run | Still single-seed; needs multi-seeding before it can be defended |
+| "PG1 ≥ raw everywhere" | **Mean holds, not significant at res224** | PG1 mean 0.352 vs raw 0.312 (+4.0 pp), within combined σ |
+| "π0.5 ≤ π0 everywhere" | **Contradicted at res224** | π0.5 mean 0.389 > π0 mean 0.372 (+1.7 pp); ordering flips from §10 |
+| "π0 beats PG1 at res224 by +2.7 pp" | **Not separated** | n=4 gap is 2.0 pp, < σ_PG1 = 2.6 pp |
+| "Raw SigLIP collapses at res224" | **Softened** | Seed=1337 (0.267) was the **worst** of four. Mean 0.312, max 0.365. Raw is still weakest on average, but the "collapse" framing was seed-contingent |
+| "DINOv2 dominate from below at res224" | **Never held** at res224 | DINOv2-B is 5th of 6 at n=4, below all SigLIP VLA variants. The dominate-from-below argument is a resumd phenomenon, not a res224 one |
+| "DINOv2-L ties SigLIP π0 at res224 (0.362 vs 0.361)" | **Coincidence** | At n=4 both are in the 0.37–0.38 band; the 0.001 gap in §10 was not informative and the two encoders remain statistically indistinguishable |
+| "res224 shows monotone raw → PG1 → π0 → π0.5 improvement" | **Mean trend only** | Mean sequence is monotone (0.312 → 0.352 → 0.372 → 0.389), but each step is ~1σ. The *trajectory* is suggestive; no individual step ordering is defended by this data |
+
+**Net effect.** The only §17 claim that survives n=4 at res224 is the coarse top-vs-bottom observation (π0.5 > raw). Every fine-grained ordering among the middle four encoders is within seed noise. The monotone raw → PG1 → π0 → π0.5 mean trajectory is the most interesting n=4 signal, but it is suggestive, not conclusive, at this sample size.
+
+---
+
+## 22. Val vs Test Gap — Systematic and Unexplained
+
+n=4 means, res224:
+
+| Encoder | Val mean | Test mean | Gap |
+|---------|----------|-----------|-----|
+| DINOv2-B/14 | 0.1961 | 0.3382 | **+0.1422** |
+| DINOv2-L/14 | 0.2258 | 0.3773 | **+0.1515** |
+| SigLIP raw | 0.1707 | 0.3125 | **+0.1417** |
+| SigLIP PG1 | 0.2014 | 0.3519 | **+0.1505** |
+| SigLIP π0 | 0.2292 | 0.3719 | **+0.1427** |
+| SigLIP π0.5 | 0.2432 | 0.3889 | **+0.1457** |
+
+The test-above-val offset is **+14.2 to +15.2 pp across every encoder**, and this was already visible in §10 (e.g. DINOv2-L val 0.218 → test 0.362). A systematic offset of this magnitude, this uniform across encoders and seeds, cannot be seed noise or an encoder-specific artifact. Candidate causes we have not ruled out:
+
+1. **Split distribution asymmetry.** The category split places different tool categories in val vs test; if test is systematically "easier" (more common grips, fewer rare affordances), every encoder would see a uniform lift.
+2. **Early-stopping selection bias.** Patience=1 with max_epochs=2 means the "best" checkpoint is chosen on a very small number of val evaluations. If that selection systematically favors a generalization direction that transfers to test, the gap would be uniform.
+3. **Patch-coverage threshold interaction.** The 55% coverage rule might discard different fractions of val vs test patches, shifting the mIoU denominator unequally.
+
+This is flagged as a **known issue**. Absolute mIoU numbers from this pipeline should not be used as a benchmark until the gap is characterized. Relative rankings within a single split (what §19/§21 use) are less affected, but the existence of this systematic offset is itself a signal that the eval setup needs auditing.
+
+---
+
+## 23. What This Section Does Not Resolve
+
+- **resumd is still n=1.** Every resumd claim in §1–§17 remains single-seed. Cross-resolution comparisons (e.g. the positional-encoding story in §12) should not be made until resumd is also multi-seeded.
+- **res384 raw SigLIP still failed.** The positional-encoding-asymmetry hypothesis in §12 needs a working raw-at-384 run to be testable; that leg does not exist.
+- **Patch-coverage threshold (55%) is un-ablated.** We do not know how sensitive res224 rankings are to this choice.
+- **Val/test gap is unexplained** — see §22.
+- **n=4 is a low noise floor.** σ on π0.5 and raw is 0.042 — wide enough that more seeds could still shift rankings, particularly for encoders at the top and bottom of the table.
+
+**The next experiments that would actually tighten these claims**, in priority order: (a) resumd multi-seed at the same 4 seeds used here; (b) diagnose and fix the res384 raw-SigLIP crash; (c) run 1–2 more seeds on res224 for π0.5 and raw specifically, since they dominate the residual uncertainty; (d) a 2-point ablation of the patch-coverage threshold.
