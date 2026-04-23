@@ -476,3 +476,138 @@ This is flagged as a **known issue**. Absolute mIoU numbers from this pipeline s
 - **n=4 is a low noise floor.** σ on π0.5 and raw is 0.042 — wide enough that more seeds could still shift rankings, particularly for encoders at the top and bottom of the table.
 
 **The next experiments that would actually tighten these claims**, in priority order: (a) resumd multi-seed at the same 4 seeds used here; (b) diagnose and fix the res384 raw-SigLIP crash; (c) run 1–2 more seeds on res224 for π0.5 and raw specifically, since they dominate the residual uncertainty; (d) a 2-point ablation of the patch-coverage threshold.
+
+---
+---
+
+# 24. Presentation Brief (self-contained)
+
+A standalone summary for downstream write-up. Everything below is derivable from §1–§23, collected here so a reader who has not opened the rest of this document can present the work in one pass.
+
+## 24.1 The problem
+
+Vision-Language-Action (VLA) policies like π0 and π0.5 (LeRobot) start from a pretrained vision encoder — SigLIP-So400m — and fine-tune it through a PaliGemma multimodal stage (PG1) and then through flow-matching / knowledge-insulated VLA training. Each stage reshapes the vision tower for policy execution, but it is unclear whether these stages preserve, improve, or degrade the geometric scene understanding that the encoder originally learned.
+
+The question this project attacks:
+
+> **Does VLA fine-tuning of a vision tower preserve the geometric affordance information that the original SigLIP encoder carried, and how do the resulting representations compare to a purely self-supervised geometry specialist like DINOv2?**
+
+The answer matters because it tells us whether the vision tower inside a robot policy is still a competent "seeing the world" module, or whether it has collapsed into a task-specific feature extractor that would need to be paired with a frozen geometry encoder in downstream systems.
+
+## 24.2 Approach
+
+We adapted the **geometry-side linear probe** from Zhang et al., *Probing and Bridging Geometry–Interaction Cues for Affordance Reasoning in Vision Foundation Models*. The paper's original aim was surveying a zoo of generic foundation models; we repurposed its methodology to characterize a specific VLA trajectory.
+
+**Method:**
+- Freeze the vision encoder.
+- Hook 4 intermediate transformer layers, fuse them by bilinear resize to the first hooked layer's grid, concatenate along channels.
+- Train a lightweight head: `BatchNorm2d → 1×1 Conv → 7-class affordance logits`.
+- Evaluate at **patch-grid resolution** (not pixel space) — each patch is assigned a majority-vote affordance class at ≥55% coverage, otherwise excluded.
+- Dataset: UMD part-affordance dataset (7 classes: grasp, cut, scoop, contain, pound, support, wrap-grasp), category-split so train / val / test contain different tool categories.
+
+**Encoders compared:**
+
+| Encoder | Params | Native res | Role |
+|---|---|---|---|
+| DINOv2-B/14 | 86M | 224 | Small self-supervised geometry reference |
+| DINOv2-L/14 | 300M | 224 | Larger self-supervised geometry reference |
+| SigLIP-So400m (raw) | 400M | 384 | Pretrained contrastive tower |
+| SigLIP-So400m (PG1) | 400M | 224 | + PaliGemma multimodal stage-1 |
+| SigLIP-So400m (π0) | 400M | 224 | + π0 flow-matching VLA fine-tune |
+| SigLIP-So400m (π0.5) | 400M | 224 | + π0.5 knowledge-insulated VLA fine-tune |
+
+The SigLIP-So400m trajectory is the **core experimental lever**: the same 400M-parameter architecture at four points along a VLA training path.
+
+**Resolutions:**
+- `res224` (16×16 patch grid) — matches π0 / π0.5's actual operating resolution.
+- `resumd` (~480×640 UMD native, 35×46 patch grid) — matches the setup in Zhang et al., serves as a pipeline validation gate.
+
+**Multi-seed:** res224 was run at 4 seeds (1337, 42, 2024, 7) to establish a noise floor. Resumd is currently single-seed (1337 only).
+
+## 24.3 Main results (preliminary)
+
+### Result 1 — Pipeline validation
+
+At `resumd` with `geometry=off`, DINOv2-B/14 scores **0.666 test mIoU** against Zhang et al.'s reported 0.670 (with geometry enabled). The pipeline reproduces the reference. Everything else is reported against this baseline.
+
+### Result 2 — Single-seed rankings are not trustworthy
+
+At `res224`, the single-seed post-fix table (§10) reported this ordering: DINOv2-L (1st) → π0 → π0.5 → PG1 → DINOv2-B → raw SigLIP (last). After running 3 additional seeds (n=4 total), the ordering shifts substantially:
+
+| Rank | Encoder | n=4 mean | σ | Per-seed [1337, 42, 2024, 7] |
+|---|---|---|---|---|
+| 1 | **SigLIP π0.5** | 0.3889 | 0.042 | [0.339, 0.393, 0.382, 0.442] |
+| 2 | **DINOv2-L** | 0.3773 | **0.011** | [0.362, 0.389, 0.375, 0.383] |
+| 3 | SigLIP π0 | 0.3719 | 0.019 | [0.361, 0.352, 0.379, 0.395] |
+| 4 | SigLIP PG1 | 0.3519 | 0.026 | [0.334, 0.358, 0.329, 0.386] |
+| 5 | DINOv2-B | 0.3383 | 0.028 | [0.318, 0.377, 0.317, 0.341] |
+| 6 | SigLIP raw | 0.3125 | 0.042 | [0.267, 0.365, 0.322, 0.296] |
+
+**No adjacent pair is statistically separated at n=4** — every adjacent-rank gap (0.5–2.6 pp) is within the per-encoder σ. Only the top–bottom gap (π0.5 vs raw, 7.6 pp) clearly exceeds noise.
+
+### Result 3 — The VLA trajectory at operating resolution is monotone in the mean
+
+At `res224` the n=4 means form a **monotone sequence along the VLA training path**:
+
+```
+raw (0.312)  →  PG1 (0.352)  →  π0 (0.372)  →  π0.5 (0.389)
+                 +4.0 pp         +2.0 pp         +1.7 pp
+```
+
+Each step is ~1σ — the trajectory is suggestive, not significant at this sample size. But the direction is consistent: every stage of VLA fine-tuning on SigLIP at least *does not harm* its geometric affordance probe, and the cumulative effect is a +7.7 pp mean improvement over raw SigLIP.
+
+### Result 4 — Resolution dictates which encoder "wins" (single-seed at resumd)
+
+At `resumd` (single-seed), DINOv2 dominates; at `res224` (n=4) the ordering compresses and flips:
+
+| Encoder | resumd test mIoU (n=1) | res224 test mIoU (n=4 mean) |
+|---|---|---|
+| DINOv2-L | 0.679 | 0.377 |
+| DINOv2-B | 0.666 | 0.338 |
+| SigLIP PG1 | 0.628 | 0.352 |
+| SigLIP raw | 0.619 | 0.312 |
+| SigLIP π0 | 0.574 | 0.372 |
+| SigLIP π0.5 | 0.571 | 0.389 |
+
+At resumd, the two DINOv2 variants (86M and 300M) beat every SigLIP variant (400M). At res224, DINOv2-B falls to 5th of 6 and π0.5 leads. **The encoder ordering flips across resolutions.** Resumd is single-seed so the comparison is under-determined, but the direction is clear enough to take seriously.
+
+### Result 5 — DINOv2-L is uniquely seed-stable
+
+DINOv2-L's per-seed σ at res224 is **0.011** — roughly 2–4× tighter than any SigLIP variant (σ = 0.019 to 0.042). This matters for interpretation: DINOv2-L's rank is the most defensible even when its mean is not on top.
+
+### Result 6 — A systematic, unexplained val/test gap
+
+Across all 24 res224 runs, test mIoU is **+14.2 to +15.2 pp** above val mIoU, uniformly across every encoder and seed. This cannot be seed noise or an encoder effect — it is a property of the splits or the training/selection loop. Three candidate causes (split distribution, early-stopping bias, coverage-threshold interaction) are identified but not resolved. **Absolute mIoU numbers from this pipeline should not be used as a benchmark until this is explained.** Relative rankings within a single split are less affected.
+
+## 24.4 Key takeaways
+
+1. **The VLA fine-tuning trajectory in SigLIP-So400m does not destroy geometric affordance information; at its operating resolution it plausibly improves it.** This is the most interesting observational signal we have — a +7.7 pp mean lift from raw to π0.5 at res224.
+
+2. **Every fine-grained claim we could have made from a single seed dissolves at n=4.** The literature of single-seed probing comparisons should be read skeptically. Concretely: "π0 > PG1" (+2.7 pp at n=1) is not separated at n=4; "π0.5 ≤ π0 everywhere" is contradicted; "raw collapses at res224" is softened to "raw is weakest on average."
+
+3. **Resolution is a first-order confound.** The same encoder ranks very differently at res224 vs resumd. Which resolution you probe at is inseparable from what you report. For VLA vision-tower characterization, the operating resolution (here, 224) is the more meaningful setting.
+
+4. **DINOv2 is a useful reference that is not strictly dominant.** It clearly wins at resumd but not at res224. The "self-supervised geometry specialists dominate from below" argument from Zhang et al. holds at resumd only; at res224 DINOv2-B is outperformed by all three VLA-trained SigLIP variants in the mean.
+
+5. **We are not yet claiming VLA fine-tuning helps or hurts the vision tower.** Affordance mIoU on UMD is a proxy whose validity for downstream policy performance has not been established. The trajectory is a *representation-level observation*, not a statement about robot capability.
+
+## 24.5 What remains / future directions
+
+### Near-term, to firm up Phase 1
+1. **Multi-seed resumd** at the same 4 seeds, so the DINOv2-vs-SigLIP resumd claim has a noise floor.
+2. **Fix the res384 raw-SigLIP crash.** Without it, the "raw SigLIP is weakest at 224 because 384 is its native resolution" positional-encoding hypothesis is untested.
+3. **Ablate the 55% patch-coverage threshold** at 2–3 points to confirm rankings are not threshold artifacts.
+4. **Explain the val/test gap** (§22) — diagnose whether it's a split, selection, or threshold artifact.
+5. **Extra seeds for π0.5 and raw** specifically, since they have the widest per-seed σ and dominate the residual uncertainty in the top-1 / bottom-1 claims.
+
+### Phase 2 and beyond
+6. **Downstream sanity check.** Pair the probe mIoU with actual policy performance on a small task set. Without this, every claim in this project is upstream-only — a statement about features, not capabilities.
+7. **Interaction-side probing** via FLUX, to complement the geometry-side probe and match the full scope of Zhang et al.
+8. **Pixel-level probe with a proper decoder** as a cross-check. The patch-grid metric is methodologically cleaner (isolates feature quality) but the absolute numbers are not comparable to pixel-level literature.
+
+## 24.6 Where to read more
+
+- Methodology and rationale: `umd_linear_probing/PHASE1_ZHANG_ADAPTATION_PLAN.md`
+- Pipeline walkthrough: `umd_linear_probing/guide.md`
+- Full numerical record: §1–§23 of this file (single-seed results, LayerNorm-fix history, multi-seed tables and per-class breakdowns)
+- Agent-oriented orientation: `geometry_probing/CLAUDE.md`
