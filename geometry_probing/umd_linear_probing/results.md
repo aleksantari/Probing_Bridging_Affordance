@@ -522,7 +522,7 @@ The SigLIP-So400m trajectory is the **core experimental lever**: the same 400M-p
 - `res224` (16×16 patch grid) — matches π0 / π0.5's actual operating resolution.
 - `resumd` (~480×640 UMD native, 35×46 patch grid) — matches the setup in Zhang et al., serves as a pipeline validation gate.
 
-**Multi-seed:** res224 was run at 4 seeds (1337, 42, 2024, 7) to establish a noise floor. Resumd is currently single-seed (1337 only).
+**Multi-seed:** both `res224` and `resumd` were run at 4 seeds (1337, 42, 2024, 7); n=4 per encoder at each resolution.
 
 ## 24.3 Main results (preliminary)
 
@@ -556,58 +556,195 @@ raw (0.312)  →  PG1 (0.352)  →  π0 (0.372)  →  π0.5 (0.389)
 
 Each step is ~1σ — the trajectory is suggestive, not significant at this sample size. But the direction is consistent: every stage of VLA fine-tuning on SigLIP at least *does not harm* its geometric affordance probe, and the cumulative effect is a +7.7 pp mean improvement over raw SigLIP.
 
-### Result 4 — Resolution dictates which encoder "wins" (single-seed at resumd)
+### Result 4 — Resolution dictates which encoder "wins" (now n=4 on both ends)
 
-At `resumd` (single-seed), DINOv2 dominates; at `res224` (n=4) the ordering compresses and flips:
+At `resumd`, DINOv2 dominates by a clear margin. At `res224` the ordering compresses and the top group is unseparated:
 
-| Encoder | resumd test mIoU (n=1) | res224 test mIoU (n=4 mean) |
-|---|---|---|
-| DINOv2-L | 0.679 | 0.377 |
-| DINOv2-B | 0.666 | 0.338 |
-| SigLIP PG1 | 0.628 | 0.352 |
-| SigLIP raw | 0.619 | 0.312 |
-| SigLIP π0 | 0.574 | 0.372 |
-| SigLIP π0.5 | 0.571 | 0.389 |
+| Encoder | resumd mean (n=4) | res224 mean (n=4) | Δ (resumd − res224) |
+|---|---|---|---|
+| DINOv2-L | 0.6660 | 0.3773 | +0.289 |
+| DINOv2-B | 0.6635 | 0.3383 | +0.325 |
+| SigLIP raw | 0.6284 | 0.3125 | +0.316 |
+| SigLIP PG1 | 0.6023 | 0.3519 | +0.250 |
+| SigLIP π0.5 | 0.5648 | 0.3889 | +0.176 |
+| SigLIP π0 | 0.5496 | 0.3719 | +0.178 |
 
-At resumd, the two DINOv2 variants (86M and 300M) beat every SigLIP variant (400M). At res224, DINOv2-B falls to 5th of 6 and π0.5 leads. **The encoder ordering flips across resolutions.** Resumd is single-seed so the comparison is under-determined, but the direction is clear enough to take seriously.
+At resumd, both DINOv2 variants (86M and 300M) beat every SigLIP variant (400M) — and the +3.5 pp gap from DINOv2-B to SigLIP raw exceeds either side's σ, so this is statistically separated. At res224, DINOv2-B falls to 5th of 6 and π0.5 leads in the mean. **The encoder ordering genuinely flips across resolutions, not as a single-seed artifact.**
 
-### Result 5 — DINOv2-L is uniquely seed-stable
+A second pattern in the Δ column: the **VLA-trained variants (π0, π0.5) gain ~half as much** from going to resumd as raw / DINOv2 do (+0.18 vs +0.30+). Consistent with their being trained at 224-native — they are saturated at their training regime and cannot exploit the extra spatial resolution as effectively.
 
-DINOv2-L's per-seed σ at res224 is **0.011** — roughly 2–4× tighter than any SigLIP variant (σ = 0.019 to 0.042). This matters for interpretation: DINOv2-L's rank is the most defensible even when its mean is not on top.
+### Result 5 — DINOv2 variants are uniquely seed-stable; the most-stable encoder differs by resolution
+
+DINOv2's per-seed σ is the smallest in the table at both resolutions, and the encoder that is *most* stable depends on resolution:
+
+- At **res224**, DINOv2-L is tightest (σ=0.011), 2–4× tighter than any SigLIP variant (σ=0.019–0.042).
+- At **resumd**, DINOv2-B is tightest (σ=0.0044), ~3× tighter than DINOv2-L at the same resolution and ~6× tighter than its own σ at res224.
+
+DINOv2-B at resumd (μ=0.6635, σ=0.0044) is **the most trustworthy single number in the document**. The fact that no SigLIP variant matches DINOv2's stability at either resolution is itself an observation about the training objective: contrastive image-text and VLA fine-tuning seem to leave the representation more sensitive to seed than DINOv2's iBOT objective does.
 
 ### Result 6 — A systematic, unexplained val/test gap
 
-Across all 24 res224 runs, test mIoU is **+14.2 to +15.2 pp** above val mIoU, uniformly across every encoder and seed. This cannot be seed noise or an encoder effect — it is a property of the splits or the training/selection loop. Three candidate causes (split distribution, early-stopping bias, coverage-threshold interaction) are identified but not resolved. **Absolute mIoU numbers from this pipeline should not be used as a benchmark until this is explained.** Relative rankings within a single split are less affected.
+Across all 48 runs (6 encoders × 4 seeds × 2 resolutions), test mIoU is **+14.2 to +15.2 pp above val** at res224 and **+14.7 to +20.6 pp above val** at resumd, uniformly across every encoder and seed. This cannot be seed noise or an encoder effect — it is a property of the splits or the training/selection loop. The largest single gap (PG1 at resumd, +20.6 pp) is wide enough to flag as its own follow-up. Three candidate causes (split distribution, early-stopping bias, coverage-threshold interaction) are identified but not resolved. **Absolute mIoU numbers from this pipeline should not be used as a benchmark until this is explained.** Relative rankings within a single split are less affected.
+
+### Result 7 — VLA fine-tuning helps at operating resolution, hurts elsewhere
+
+Within the SigLIP-So400m trajectory, the n=4 means tell **opposite stories at the two resolutions**:
+
+```
+res224  (n=4):  raw (0.312) → PG1 (0.352) → π0 (0.372) → π0.5 (0.389)   monotone-up,   +7.7 pp cumulative
+resumd  (n=4):  raw (0.628) → PG1 (0.602) → π0 (0.550) → π0.5 (0.565)   net-down,      −6.3 pp from raw
+```
+
+At the operating resolution (224), every VLA stage at minimum does not harm the geometric affordance probe and the cumulative effect is positive. At resumd, each VLA stage is below raw SigLIP. This is the strongest single observation about the VLA training trajectory the project has: **the improvement is operating-resolution-specific, not a representational improvement.**
 
 ## 24.4 Key takeaways
 
-1. **The VLA fine-tuning trajectory in SigLIP-So400m does not destroy geometric affordance information; at its operating resolution it plausibly improves it.** This is the most interesting observational signal we have — a +7.7 pp mean lift from raw to π0.5 at res224.
+1. **VLA fine-tuning of SigLIP-So400m has opposite effects at different resolutions.** At the operating resolution (res224), each VLA stage at minimum does not harm the geometric affordance probe, and the cumulative trajectory raw → PG1 → π0 → π0.5 lifts mean mIoU by +7.7 pp. At resumd, the same trajectory is net negative (−6.3 pp from raw to π0.5). The improvement at res224 is **operating-resolution-specific, not a fundamental gain in representational quality** — it does not transfer to a higher-resolution geometric probe.
 
-2. **Every fine-grained claim we could have made from a single seed dissolves at n=4.** The literature of single-seed probing comparisons should be read skeptically. Concretely: "π0 > PG1" (+2.7 pp at n=1) is not separated at n=4; "π0.5 ≤ π0 everywhere" is contradicted; "raw collapses at res224" is softened to "raw is weakest on average."
+2. **Every fine-grained claim we could have made from a single seed dissolves at n=4.** The literature of single-seed probing comparisons should be read skeptically. Concretely: "π0 > PG1" (+2.7 pp at n=1) is not separated at n=4 at res224; "π0.5 ≤ π0 everywhere" is contradicted at *both* resolutions; "raw collapses at res224" softens to "raw is weakest on average"; the resumd within-SigLIP ordering (PG1 > raw > π0 > π0.5) entirely reshuffles to (raw > PG1 > π0.5 > π0).
 
-3. **Resolution is a first-order confound.** The same encoder ranks very differently at res224 vs resumd. Which resolution you probe at is inseparable from what you report. For VLA vision-tower characterization, the operating resolution (here, 224) is the more meaningful setting.
+3. **Resolution is a first-order confound.** The same encoder ranks very differently at res224 vs. resumd, and this is now n=4 supported on both ends. Which resolution you probe at is inseparable from what you report. For VLA vision-tower characterization, the operating resolution (here, 224) is the more meaningful setting; for geometric capability in the abstract, resumd is more diagnostic.
 
-4. **DINOv2 is a useful reference that is not strictly dominant.** It clearly wins at resumd but not at res224. The "self-supervised geometry specialists dominate from below" argument from Zhang et al. holds at resumd only; at res224 DINOv2-B is outperformed by all three VLA-trained SigLIP variants in the mean.
+4. **DINOv2 is clearly dominant at resumd at n=4.** Both DINOv2 variants beat every SigLIP variant by ≥3.5 pp at means clearly larger than per-encoder σ — this is the best-supported inter-encoder claim in the project. At res224 the picture is murkier: only DINOv2-L is competitive, and the top cluster (π0.5, DINOv2-L, π0) is unseparated. The "self-supervised geometry specialists dominate from below" argument from Zhang et al. **holds cleanly at resumd**; at res224 it does not survive multi-seeding.
 
-5. **We are not yet claiming VLA fine-tuning helps or hurts the vision tower.** Affordance mIoU on UMD is a proxy whose validity for downstream policy performance has not been established. The trajectory is a *representation-level observation*, not a statement about robot capability.
+5. **We are not yet claiming VLA fine-tuning helps or hurts the vision tower in absolute terms.** Affordance mIoU on UMD is a proxy whose validity for downstream policy performance has not been established. The opposite-direction-at-different-resolutions finding is a *representation-level observation*, not a statement about robot capability.
 
 ## 24.5 What remains / future directions
 
 ### Near-term, to firm up Phase 1
-1. **Multi-seed resumd** at the same 4 seeds, so the DINOv2-vs-SigLIP resumd claim has a noise floor.
-2. **Fix the res384 raw-SigLIP crash.** Without it, the "raw SigLIP is weakest at 224 because 384 is its native resolution" positional-encoding hypothesis is untested.
+1. **Fix the res384 raw-SigLIP crash.** Without it, the "raw SigLIP is weakest at 224 because 384 is its native resolution" positional-encoding hypothesis is untested.
+2. **Explain the val/test gap** (§22 / Result 6) — diagnose whether it's a split, selection, or threshold artifact. The PG1 resumd gap (+20.6 pp, the largest single value) is the natural starting point.
 3. **Ablate the 55% patch-coverage threshold** at 2–3 points to confirm rankings are not threshold artifacts.
-4. **Explain the val/test gap** (§22) — diagnose whether it's a split, selection, or threshold artifact.
-5. **Extra seeds for π0.5 and raw** specifically, since they have the widest per-seed σ and dominate the residual uncertainty in the top-1 / bottom-1 claims.
+4. **Extra seeds for π0.5 and raw at res224** specifically, since they have the widest per-seed σ at that resolution (~0.042 each) and dominate the residual uncertainty in the top-1 / bottom-1 res224 claims.
 
 ### Phase 2 and beyond
-6. **Downstream sanity check.** Pair the probe mIoU with actual policy performance on a small task set. Without this, every claim in this project is upstream-only — a statement about features, not capabilities.
-7. **Interaction-side probing** via FLUX, to complement the geometry-side probe and match the full scope of Zhang et al.
-8. **Pixel-level probe with a proper decoder** as a cross-check. The patch-grid metric is methodologically cleaner (isolates feature quality) but the absolute numbers are not comparable to pixel-level literature.
+5. **Downstream sanity check.** Pair the probe mIoU with actual policy performance on a small task set. Without this, every claim in this project is upstream-only — a statement about features, not capabilities. The opposite-direction-at-different-resolutions finding (Takeaway 1) makes this especially urgent: until we know which resolution's verdict actually predicts policy behavior, we cannot say whether VLA fine-tuning helps or hurts.
+6. **Interaction-side probing** via FLUX, to complement the geometry-side probe and match the full scope of Zhang et al.
+7. **Pixel-level probe with a proper decoder** as a cross-check. The patch-grid metric is methodologically cleaner (isolates feature quality) but the absolute numbers are not comparable to pixel-level literature.
 
 ## 24.6 Where to read more
 
 - Methodology and rationale: `umd_linear_probing/PHASE1_ZHANG_ADAPTATION_PLAN.md`
 - Pipeline walkthrough: `umd_linear_probing/guide.md`
-- Full numerical record: §1–§23 of this file (single-seed results, LayerNorm-fix history, multi-seed tables and per-class breakdowns)
+- Full numerical record: §1–§29 of this file (single-seed results, LayerNorm-fix history, multi-seed tables and per-class breakdowns at both resolutions, cross-resolution synthesis)
 - Agent-oriented orientation: `geometry_probing/CLAUDE.md`
+
+---
+---
+
+# Phase 1 Linear Probing Results — Resumd Multi-Seed (n=4)
+
+**Date:** 2026-04-28 (sweep finished 2026-04-29 00:21 — last run crossed midnight).
+**Code state:** Same post-LayerNorm-fix code as §10–§17.
+**Scope:** 6 resumd configs only.
+
+---
+
+## 25. Multi-Seed Resumd Setup
+
+§10 / §17 reported every resumd ordering from a single seed (1337). §23 listed multi-seeding resumd as the #1 follow-up, and §24 Result 4 leaned on the n=1 resumd to claim "encoder ordering flips across resolutions." This sweep adds three seeds (42, 2024, 7), giving **n=4 per encoder at resumd** — matching the sample size at res224.
+
+- 18 new runs (6 configs × 3 seeds), all completed with `rc=0` in 11198s (~3h 7min).
+- Hyperparameters identical to §10 / §18: `max_epochs=2`, `patience=1`, `lr=1e-3`, `wd=1e-2`, `batch_size=4`, `precision=bf16`, geometry disabled.
+- Output dirs: `outputs/{encoder}_resumd_2026042{8,9}-*/`. Seed recorded in each `summary.json` and `config_snapshot.yaml`.
+
+---
+
+## 26. Aggregate Test mIoU at Resumd (n=4, Sorted by Mean)
+
+Per-seed values listed in seed order **[1337, 42, 2024, 7]**.
+
+| Rank | Encoder | Params | n | Mean | Std | Min | Max | Per-seed values |
+|------|---------|--------|---|------|-----|-----|-----|-----------------|
+| 1 | DINOv2-L/14 | 300M | 4 | **0.6660** | 0.0208 | 0.6351 | 0.6795 | [0.680, 0.678, 0.672, 0.635] |
+| 2 | DINOv2-B/14 | 86M | 4 | **0.6635** | **0.0044** | 0.6592 | 0.6685 | [0.666, 0.669, 0.660, 0.659] |
+| 3 | SigLIP raw | 400M | 4 | **0.6284** | 0.0123 | 0.6167 | 0.6414 | [0.619, 0.617, 0.636, 0.641] |
+| 4 | SigLIP PG1 | 400M | 4 | **0.6023** | 0.0265 | 0.5745 | 0.6278 | [0.628, 0.575, 0.585, 0.622] |
+| 5 | SigLIP π0.5 | 400M | 4 | **0.5648** | 0.0168 | 0.5399 | 0.5770 | [0.571, 0.577, 0.571, 0.540] |
+| 6 | SigLIP π0 | 400M | 4 | **0.5496** | 0.0268 | 0.5203 | 0.5738 | [0.574, 0.534, 0.520, 0.571] |
+
+### Two key observations
+
+1. **DINOv2 > SigLIP at resumd is now defensible.** DINOv2-B (μ=0.6635, σ=0.004) and DINOv2-L (μ=0.6660, σ=0.021) sit clearly above SigLIP raw (μ=0.6284, σ=0.012) — a +3.5 pp gap that exceeds either side's σ. Every other SigLIP variant is further below. **Of the inter-encoder claims in this whole project, this is the best-supported one.**
+
+2. **DINOv2-B at resumd is the most seed-stable encoder × resolution pair we have observed** (σ=0.0044, ~3× tighter than DINOv2-L at resumd, and ~6× tighter than its own σ at res224). Why this is so much tighter at resumd than at res224 is itself an open question, but it makes resumd-DINOv2-B the most trustworthy single number in the document.
+
+### Adjacent-rank gap vs σ
+
+| Pair | Mean gap | Relevant σ | Separated? |
+|---|---|---|---|
+| DINOv2-L − DINOv2-B | 0.3 pp | 2.1 / 0.4 | No — effectively tied |
+| DINOv2-B − raw | 3.5 pp | 0.4 / 1.2 | **Yes** |
+| raw − PG1 | 2.6 pp | 1.2 / 2.7 | No (within σ_PG1) |
+| PG1 − π0.5 | 3.7 pp | 2.7 / 1.7 | Borderline |
+| π0.5 − π0 | 1.5 pp | 1.7 / 2.7 | No |
+
+The cleanest separation is the **DINOv2 cluster (top 2) vs the SigLIP cluster (bottom 4)**.
+
+---
+
+## 27. Per-Class Test IoU at Resumd (n=4 Mean)
+
+| Encoder | grasp | cut | scoop | contain | pound | support | wrap-grasp |
+|---------|-------|-----|-------|---------|-------|---------|------------|
+| DINOv2-L | 0.475 | **0.714** | **0.474** | 0.800 | **0.746** | **0.678** | **0.775** |
+| DINOv2-B | **0.518** | 0.702 | 0.468 | 0.794 | 0.732 | 0.666 | 0.766 |
+| SigLIP raw | 0.447 | 0.679 | 0.399 | 0.804 | 0.646 | 0.663 | 0.762 |
+| SigLIP PG1 | 0.465 | 0.681 | 0.354 | **0.805** | 0.639 | 0.625 | 0.648 |
+| SigLIP π0 | 0.431 | 0.673 | 0.325 | 0.763 | 0.497 | 0.498 | 0.660 |
+| SigLIP π0.5 | 0.393 | 0.690 | 0.277 | 0.789 | 0.617 | 0.564 | 0.623 |
+
+DINOv2-B leads on grasp; DINOv2-L leads on five classes (cut, scoop, pound, support, wrap-grasp); SigLIP PG1 leads on contain by 0.001 over raw and 0.005 over DINOv2-L (effectively tied). **The two DINOv2 variants together dominate 6 of 7 classes at resumd**, in stark contrast to res224 (§20) where SigLIP π0.5 dominated 4 of 7.
+
+---
+
+## 28. Resumd Claims Revisited (vs §10 Single-Seed)
+
+| Single-seed claim (§10) | n=4 verdict at resumd | Notes |
+|---|---|---|
+| "DINOv2 > SigLIP at resumd" | **Confirmed and strengthened** | Cleanest, best-supported inter-encoder claim in this project |
+| "PG1 is the SigLIP high-water mark at resumd" (rank 3rd of 6) | **Contradicted** | At n=4, raw (0.628) > PG1 (0.602). Within σ_PG1, but the ordering flips |
+| "raw is 4th among encoders at resumd" | **Contradicted** | raw moves from 4th to 3rd (above all VLA-trained variants) |
+| "π0.5 < π0 at resumd" (single-seed: 0.571 vs 0.574) | **Contradicted** | n=4: π0.5 (0.565) > π0 (0.550). Now contradicted at *both* resolutions |
+| "Resumd within-SigLIP trajectory: raw → PG1 → π0 → π0.5 with PG1 peak" | **Different shape at n=4** | Means: raw (0.628) → PG1 (0.602) → π0 (0.550) → π0.5 (0.565). Monotone-decreasing through π0, then a small rebound at π0.5. PG1 is **not** a peak |
+
+**Net effect.** Of the resumd claims in §1–§17, the one that survives n=4 (and is clearly *strengthened*) is the DINOv2-vs-SigLIP one. Every fine-grained ordering among the SigLIP variants at resumd flips somewhere. The "VLA fine-tuning degrades affordance performance vs raw at resumd" trend is preserved in shape (raw remains the best of the SigLIP variants), but the specific within-VLA orderings are not separated.
+
+---
+
+## 29. Cross-Resolution Picture (n=4 on Both Ends)
+
+This is the section that lets the project finally make a defensible *cross-resolution* claim.
+
+### Cross-resolution n=4 means
+
+| Encoder | res224 mean | resumd mean | Δ (resumd − res224) |
+|---|---|---|---|
+| DINOv2-L | 0.3773 | 0.6660 | **+0.2887** |
+| DINOv2-B | 0.3383 | 0.6635 | **+0.3252** |
+| SigLIP raw | 0.3125 | 0.6284 | **+0.3159** |
+| SigLIP PG1 | 0.3519 | 0.6023 | +0.2504 |
+| SigLIP π0.5 | 0.3889 | 0.5648 | +0.1759 |
+| SigLIP π0 | 0.3719 | 0.5496 | +0.1777 |
+
+### Three cross-resolution observations now defensible at n=4
+
+1. **DINOv2 dominates at resumd; the picture is murkier at res224.** At resumd, DINOv2-L/B clearly beat all SigLIP. At res224, only DINOv2-L is competitive (rank 2, tied with the top SigLIP cluster); DINOv2-B falls to rank 5. **Encoder rankings are genuinely resolution-dependent**, not single-seed artifacts.
+
+2. **VLA fine-tuning improves res224 mean, hurts resumd mean.** Within SigLIP-So400m:
+   - At res224 (n=4 means): raw (0.312) → PG1 (0.352) → π0 (0.372) → π0.5 (0.389). **Monotone improvement, +7.7 pp cumulative.**
+   - At resumd (n=4 means): raw (0.628) → PG1 (0.602) → π0 (0.550) → π0.5 (0.565). **Net degradation, −6.3 pp from raw to π0.5.**
+   The directions are *opposite*. The VLA training trajectory is helpful at the operating resolution and harmful when the encoder is asked to operate outside it.
+
+3. **VLA-trained encoders gain less from going to resumd.** Δ (resumd − res224) for π0 / π0.5 is +0.178 / +0.176; for raw / PG1 is +0.316 / +0.250; for DINOv2 is +0.325 / +0.289. The VLA-trained variants benefit roughly **half as much** from the higher resolution as raw / DINOv2 do. Consistent with their being trained at 224-native — they are effectively saturated for their training regime and cannot exploit the extra spatial resolution as effectively.
+
+### Caveats
+
+- **Same-seed cross-resolution comparison** (e.g. π0.5 at seed=42 res224 vs. π0.5 at seed=42 resumd) would be a stronger statement than comparing aggregate means. Both sweeps used the same seed set, so this comparison is *available* in the data but not surfaced in the table above.
+- **The val/test gap (§22) at resumd** is +14.7 to +20.6 pp — slightly larger than res224's +14–15 pp band — and PG1's resumd gap (+20.6 pp) is the largest single value across either resolution. Still systematic, still unexplained, but more variable across encoders at resumd than at res224.
+
+### Open items after this sweep
+
+- **Cross-resolution claims are now n=4 supported.** The DINOv2-vs-SigLIP and VLA-trajectory-direction findings have a noise floor on both ends.
+- **Still un-resolved:** res384 raw-SigLIP crash; coverage-threshold ablation; val/test gap explanation; downstream-policy validation of the proxy.
+- **The PG1 val/test gap at resumd (+20.6 pp)** is large enough to flag as its own follow-up — worth a single deliberate look before the next reporting cycle.
